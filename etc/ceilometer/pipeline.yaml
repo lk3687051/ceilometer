@@ -1,5 +1,20 @@
 ---
 sources:
+    - name: sg_source
+      interval: 600
+      meters:
+          -  "sg.incoming.drop.pkts"
+          -  "sg.incoming.drop.bytes"
+          -  "sg.incoming.accept.pkts"
+          -  "sg.incoming.accept.bytes"
+          -  "sg.outgoing.drop.pkts"
+          -  "sg.outgoing.drop.bytes"
+          -  "sg.outgoing.accept.pkts"
+          -  "sg.outgoing.accept.bytes"
+
+      sinks:
+          - meter_sink
+
     - name: meter_source
       interval: 600
       meters:
