@@ -18,6 +18,7 @@ from oslo_utils import timeutils
 
 from ceilometer.agent import plugin_base
 from ceilometer import nova_client
+from ceilometer import neutron_client
 
 OPTS = [
     cfg.BoolOpt('workload_partitioning',
@@ -37,6 +38,7 @@ class InstanceDiscovery(plugin_base.DiscoveryBase):
 
     def discover(self, manager, param=None):
         """Discover resources to monitor."""
+        import pdb;pdb.set_trace();
         try:
             instances = self.nova_cli.instance_get_all_by_host(
                 cfg.CONF.host, self.last_run)
@@ -61,3 +63,33 @@ class InstanceDiscovery(plugin_base.DiscoveryBase):
             return cfg.CONF.host
         else:
             return None
+
+class PortDiscovery(plugin_base.DiscoveryBase):
+    def __init__(self):
+        super(PortDiscovery, self).__init__()
+        self.neutron_cli = neutron_client.Client()
+        self.last_run = None
+        self.ports = {}
+
+    def discover(self, manager, param=None):
+        """Discover resources to monitor."""
+        try:
+            ports = self.neutron_cli.port_get_local(
+                cfg.CONF.host)
+
+        except Exception:
+            # NOTE(zqfan): instance_get_all_by_host is wrapped and will log
+            # exception when there is any error. It is no need to raise it
+            # again and print one more time.
+            return []
+
+        for port in ports:
+                print "---------------------------------------------------"
+                print port
+                print "---------------------------------------------------"
+                port_id = port['id']
+                if port['port_security_enabled']:
+                	self.ports[port_id] = port
+        self.last_run = timeutils.utcnow(True).isoformat()
+        return self.ports.values()
+

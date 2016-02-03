@@ -71,6 +71,11 @@ class Client(object):
         return resp.get('ports')
 
     @logged
+    def port_get_local(self, host):
+        resp = self.client.list_ports(host=host)
+        return resp.get('ports')
+
+    @logged
     def vip_get_all(self):
         resp = self.client.list_vips()
         return resp.get('vips')
