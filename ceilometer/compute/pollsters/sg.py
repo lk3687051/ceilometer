@@ -34,7 +34,6 @@ class _Base(plugin_base.PollsterBase):
 
     @staticmethod
     def make_sg_sample(port, name, type, unit, volume):
-        import pdb;pdb.set_trace();
         samp = sample.Sample(
             name=name,
             type=type,
