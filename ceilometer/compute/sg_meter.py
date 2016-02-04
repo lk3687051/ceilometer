@@ -51,7 +51,6 @@ class SGmetering(object):
 
     """
     def __init__(self, port):
-        print port
         self.chain_in = self._get_port_chain_name(port, INGRESS_DIRECTION)
         self.chain_out = self._get_port_chain_name(port, EGRESS_DIRECTION)
         self.chain_spoof = self._get_port_chain_name(port, SPOOF_FILTER)
@@ -79,8 +78,8 @@ class SGmetering(object):
                   = self._get_counters_by_chain(self.chain_spoof)
         self.in_drop_bytes += acc_drop['bytes']
         self.in_drop_packets += acc_drop['pkts']
-        self.in_accept_bytes += acc_accept['bytes']
-        self.in_accept_packets += acc_accept['pkts']
+        #self.in_accept_bytes += acc_accept['bytes']
+        #self.in_accept_packets += acc_accept['pkts']
 
         acc_accept['pkts'], acc_accept['bytes'], acc_drop['pkts'], acc_drop['bytes'] \
                   = self._get_counters_by_chain(self.chain_out)
@@ -116,7 +115,7 @@ class SGmetering(object):
                     not data[0].isdigit() or
                     not data[1].isdigit()):
                 break
-            if data[2] == 'ACCEPT' or data[2] == 'RETURN':
+            if data[2] == 'RETURN':
                 acc_accept['pkts'] += int(data[0])
                 acc_accept['bytes'] += int(data[1])
             elif data[2] == 'DROP' or data[2] == 'neutron-openvswi-sg-fallback':

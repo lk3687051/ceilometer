@@ -15,7 +15,7 @@
 import copy
 
 from oslo_log import log
-
+import collections
 import ceilometer
 from ceilometer.compute import pollsters
 from ceilometer.compute.pollsters import util
@@ -24,6 +24,13 @@ from ceilometer import sample
 from ceilometer.compute import sg_meter
 from oslo_utils import timeutils
 from ceilometer.agent import plugin_base
+
+
+SGStatsData = collections.namedtuple(
+    'SGStats',
+    ['in_drop_bytes', 'in_drop_packets', 'in_accept_bytes', 'in_accept_packets',
+     'out_drop_bytes', 'out_drop_packets', 'out_accept_bytes', 'out_accept_packets']
+)
 
 LOG = log.getLogger(__name__)
 class _Base(plugin_base.PollsterBase):
@@ -41,13 +48,11 @@ class _Base(plugin_base.PollsterBase):
             volume=volume,
             user_id=port['network_id'],
             project_id=port['tenant_id'],
-            resource_id='.'.join([port['tenant_id'], port['tenant_id'], port['device_id'],type]),
+            resource_id=port['device_id'],
             timestamp=timeutils.utcnow().isoformat(),
             resource_metadata=None,
         )
-        #print '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%'
-        #print samp
-        #print '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%'
+
         return samp
 
     def _record_poll_time(self):
@@ -66,12 +71,32 @@ class _Base(plugin_base.PollsterBase):
     def _get_sg_for_port(self, port):
         return sg_meter.SGmetering(port)
 
+    def _populate_stats_cache(self, port_id, cache):
+        i_cache = cache.setdefault("sgstats", {})
+        if port_id not in i_cache:
+            stats = self._get_sg_for_port(port_id)
+            i_cache[port_id] = SGStatsData(
+                in_drop_bytes=stats.in_drop_bytes,
+                in_drop_packets=stats.in_drop_packets,
+                in_accept_bytes=stats.in_accept_bytes,
+                in_accept_packets=stats.in_accept_packets,
+                out_drop_bytes=stats.out_drop_bytes,
+                out_drop_packets=stats.out_drop_packets,
+                out_accept_bytes=stats.out_accept_bytes,
+                out_accept_packets=stats.out_accept_packets,
+            )
+        return i_cache[port_id]
+
     def get_samples(self, manager, cache, resources):
         self._inspection_duration = self._record_poll_time()
         for port in resources:
             LOG.debug('checking net info for instance %s', port['id'])
-            info = self._get_sg_for_port(port['id'])
-            yield self._get_sample(port, info)
+            try:
+                c_data = self._populate_stats_cache(port['id'], cache)
+                yield self._get_sample(port, c_data)
+            except Exception as err:
+                LOG.exception(_('Ignoring port %(port_id)s: %(error)s'),
+                              {'port_id': port['id'], 'error': err})
 
 class IncomingAcceptBytesPollster(_Base):
     def _get_sample(self, port, info):
