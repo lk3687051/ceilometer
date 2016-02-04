@@ -20,7 +20,7 @@ from ceilometer.compute import pollsters
 from ceilometer.compute.pollsters import util
 from ceilometer.i18n import _, _LW
 from ceilometer import sample
-from ceilometer.compute import get_sg_cache
+from ceilometer.compute import sg_meter
 from oslo_utils import timeutils
 from ceilometer.agent import plugin_base
 import collections
@@ -62,7 +62,7 @@ class _Base(plugin_base.PollsterBase):
     def get_samples(self, manager, cache, resources):
         i_cache = cache.setdefault("sgstats", {})
         if len(i_cache) is 0:
-            get_sg_cache(self, resources, cache)
+            sg_meter.get_sg_cache(self, resources, cache)
 
         self._inspection_duration = self._record_poll_time()
         for port in resources:
