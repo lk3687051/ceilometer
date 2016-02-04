@@ -144,7 +144,7 @@ class OutgoingDropBytesPollster(_Base):
             volume=info.out_drop_bytes,
         )
 
-class IncomingDropPktsPollster(_Base):
+class OutgoingDropPktsPollster(_Base):
     def _get_sample(self, port, info):
         return self.make_sg_sample(
             port,
