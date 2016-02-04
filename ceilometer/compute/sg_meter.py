@@ -94,7 +94,7 @@ class SGmetering(object):
     #    I think here have some performance issue.
     #    When we have much china, it will exec iptable**** much time, I think it will be too bad.
     #    Need get a good idea for it.
-    def _get_counters_by_chain(self, chain, zero=False):
+    def _get_counters_by_chain(self, chain, zero=True):
         """Return the sum of the traffic counters of all rules of a chain."""
         acc_accept = {'pkts': 0, 'bytes': 0}
         acc_drop = {'pkts': 0, 'bytes':0}
