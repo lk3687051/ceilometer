@@ -1,5 +1,6 @@
 import subprocess
 from eventlet import greenthread
+import collections
 
 INGRESS_DIRECTION = 'ingress'
 EGRESS_DIRECTION = 'egress'
@@ -10,6 +11,13 @@ CHAIN_NAME_PREFIX = {INGRESS_DIRECTION: 'i',
                      EGRESS_DIRECTION: 'o',
                      SPOOF_FILTER: 's'}
 MAX_CHAIN_LEN_NOWRAP = 28
+
+
+SGPortData = collections.namedtuple(
+    'SGPort',
+    ['in_drop_bytes', 'in_drop_packets', 'in_accept_bytes', 'in_accept_packets',
+     'out_drop_bytes', 'out_drop_packets', 'out_accept_bytes', 'out_accept_packets']
+)
 
 def execute(cmd):
     try:
@@ -28,103 +36,68 @@ def execute(cmd):
 
     return _stdout
 
-class SGmetering(object):
-    """Wrapper for iptables.
+def _get_counters(chain_lines):
+    counter = {'acc_pkts': 0, 'acc_bytes': 0 , 'drop_pkts': 0, 'drop_bytes':0}
+    for line in chain_lines:
+        if not line:
+            break
+        data = line.split()
+        if (len(data) < 2 or
+                not data[0].isdigit() or
+                not data[1].isdigit()):
+            break
+        if data[2] == 'RETURN':
+            counter['acc_pkts'] += int(data[0])
+            counter['acc_bytes'] += int(data[1])
+        elif data[2] == 'DROP' or data[2] == 'neutron-openvswi-sg-fallback':
+            counter['drop_pkts'] += int(data[0])
+            counter['drop_bytes'] += int(data[1])
+        else:
+            pass
+        return counter
 
-    See IptablesTable for some usage docs
+def _get_iptables_info(zero=True):
 
-    A number of chains are set up to begin with.
+    non_field = ['neutron-openvswi-FORWARD', 'neutron-openvswi-INPUT',
+         'neutron-openvswi-OUTPUT', 'neutron-openvswi-local',
+         'neutron-openvswi-sg-chain', 'neutron-openvswi-sg-fallback']
 
-    First, neutron-filter-top. It's added at the top of FORWARD and OUTPUT.
-    Its name is not wrapped, so it's shared between the various neutron
-    workers. It's intended for rules that need to live at the top of the
-    FORWARD and OUTPUT chains. It's in both the ipv4 and ipv6 set of tables.
+    chain_counters = {}
+    cmd = "iptables"
+    args = ['sudo', cmd,  '-L', '-n', '-v', '-x']
+    if zero:
+        args.append('-Z')
+    current_text = execute(args)
+    chain_list = current_text.split('\n\n')
+    for chain_info in chain_list:
+        chain_lines = chain_info.split('\n')
+        chain_name = chain_lines[0].split(' ')[1]
 
-    For ipv4 and ipv6, the built-in INPUT, OUTPUT, and FORWARD filter chains
-    are wrapped, meaning that the "real" INPUT chain has a rule that jumps to
-    the wrapped INPUT chain, etc. Additionally, there's a wrapped chain named
-    "local" which is jumped to from neutron-filter-top.
+        if CHAIN_PREFIX in chain_name and chain_name not in non_field:
+            if chain_name[len(CHAIN_PREFIX)] in ['i', 'o', 's']:
+                chain_counters[chain_name] = _get_counters(chain_lines[2:])
+    return chain_counters
 
-    For ipv4, the built-in PREROUTING, OUTPUT, and POSTROUTING nat chains are
-    wrapped in the same was as the built-in filter chains. Additionally,
-    there's a snat chain that is applied after the POSTROUTING chain.
+def _get_port_chain_name(port, direction):
+    return ('%s%s%s' % (CHAIN_PREFIX, CHAIN_NAME_PREFIX[direction], port))[:MAX_CHAIN_LEN_NOWRAP]
 
-    """
-    def __init__(self, port):
-        self.chain_in = self._get_port_chain_name(port, INGRESS_DIRECTION)
-        self.chain_out = self._get_port_chain_name(port, EGRESS_DIRECTION)
-        self.chain_spoof = self._get_port_chain_name(port, SPOOF_FILTER)
-        self.in_drop_bytes = 0
-        self.in_drop_packets = 0
-        self.in_accept_bytes = 0
-        self.in_accept_packets = 0
-        self.out_drop_bytes = 0
-        self.out_drop_packets = 0
-        self.out_accept_bytes = 0
-        self.out_accept_packets = 0
-        #self.get_traffic_counters(self.chain_in, zero=True)
-
-        acc_accept = {'pkts': 0, 'bytes': 0}
-        acc_drop = {'pkts': 0, 'bytes':0}
-
-        acc_accept['pkts'], acc_accept['bytes'], acc_drop['pkts'], acc_drop['bytes'] \
-                  = self._get_counters_by_chain(self.chain_in)
-        self.in_drop_bytes += acc_drop['bytes']
-        self.in_drop_packets += acc_drop['pkts']
-        self.in_accept_bytes += acc_accept['bytes']
-        self.in_accept_packets += acc_accept['pkts']
-
-        acc_accept['pkts'], acc_accept['bytes'], acc_drop['pkts'], acc_drop['bytes'] \
-                  = self._get_counters_by_chain(self.chain_spoof)
-        self.in_drop_bytes += acc_drop['bytes']
-        self.in_drop_packets += acc_drop['pkts']
-        #self.in_accept_bytes += acc_accept['bytes']
-        #self.in_accept_packets += acc_accept['pkts']
-
-        acc_accept['pkts'], acc_accept['bytes'], acc_drop['pkts'], acc_drop['bytes'] \
-                  = self._get_counters_by_chain(self.chain_out)
-        self.out_drop_bytes = acc_drop['bytes']
-        self.out_drop_packets = acc_drop['pkts']
-        self.out_accept_bytes = acc_accept['bytes']
-        self.out_accept_packets = acc_accept['pkts']
-
-    def _get_port_chain_name(self, port, direction):
-        return ('%s%s%s' % (CHAIN_PREFIX, CHAIN_NAME_PREFIX[direction], port))[:MAX_CHAIN_LEN_NOWRAP]
-
-    #    I think here have some performance issue.
-    #    When we have much china, it will exec iptable**** much time, I think it will be too bad.
-    #    Need get a good idea for it.
-    def _get_counters_by_chain(self, chain, zero=True):
-        """Return the sum of the traffic counters of all rules of a chain."""
-        acc_accept = {'pkts': 0, 'bytes': 0}
-        acc_drop = {'pkts': 0, 'bytes':0}
-
-        cmd = "iptables"
-        args = ['sudo', cmd,  '-L', chain, '-n', '-v', '-x']
-        if zero:
-            args.append('-Z')
-
-        current_table = execute(args)
-        current_lines = current_table.split('\n')
-
-        for line in current_lines[2:]:
-            if not line:
-                break
-            data = line.split()
-            if (len(data) < 2 or
-                    not data[0].isdigit() or
-                    not data[1].isdigit()):
-                break
-            if data[2] == 'RETURN':
-                acc_accept['pkts'] += int(data[0])
-                acc_accept['bytes'] += int(data[1])
-            elif data[2] == 'DROP' or data[2] == 'neutron-openvswi-sg-fallback':
-                acc_drop['pkts'] += int(data[0])
-                acc_drop['bytes'] += int(data[1])
-            else:
-                pass
-
-        return acc_accept['pkts'], acc_accept['bytes'], acc_drop['pkts'], acc_drop['bytes']
+# Get SG info.
+def get_sg_cache(ports, cache):
+    chain_counters = _get_iptables_info()
+    for port in ports:
+        in_counter = chain_counters(_get_port_chain_name(port, INGRESS_DIRECTION))
+        out_counter = chain_counters(_get_port_chain_name(port, EGRESS_DIRECTION))
+        spoof_counter = chain_counters(_get_port_chain_name(port, SPOOF_FILTER))
+        cache[port] = SGPortData(
+            in_drop_bytes=in_counter['drop_bytes'],
+            in_drop_packets=in_counter['drop_pkts'],
+            in_accept_bytes=in_counter['acc_bytes'],
+            in_accept_packets=in_counter['acc_pkts'],
+            out_drop_bytes=out_counter['drop_bytes'] + spoof_counter['drop_bytes'],
+            out_drop_packets=out_counter['drop_pkts'] + spoof_counter['drop_pkts'],
+            out_accept_bytes=out_counter['acc_bytes'],
+            out_accept_packets=out_counter['acc_pkts'],
+        )
 
 
 
