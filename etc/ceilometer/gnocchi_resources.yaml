@@ -174,3 +174,14 @@ resources:
       - 'volume.detach'
     attributes:
       display_name: resource_metadata.display_name
+
+  - resource_type: sg
+    metrics:
+      - 'sg.incoming.drop.pkts'
+      - 'sg.incoming.drop.bytes'
+      - 'sg.incoming.accept.pkts'
+      - 'sg.incoming.accept.bytes'
+      - 'sg.outgoing.drop.pkts'
+      - 'sg.outgoing.drop.bytes'
+      - 'sg.outgoing.accept.pkts'
+      - 'sg.outgoing.accept.bytes'
